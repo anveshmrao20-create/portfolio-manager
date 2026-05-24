@@ -1,0 +1,12 @@
+﻿fastapi
+uvicorn
+pandas
+numpy
+sqlalchemy
+psycopg2-binary
+yfinance
+ta
+openpyxl
+python-dotenv
+pypdf
+telethon
