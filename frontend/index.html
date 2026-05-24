@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Portfolio AI Assistant</title>
+    <style>
+      :root {
+        --bg: #f4f7f9;
+        --panel: #ffffff;
+        --text: #11202f;
+        --muted: #5c6b78;
+        --brand: #0f766e;
+        --brand-soft: #dff5f2;
+        --border: #d8e1e8;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+        background: linear-gradient(180deg, #f7fafc, var(--bg));
+        color: var(--text);
+      }
+
+      .app {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 16px;
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+      }
+
+      .chat-head, .summary-head {
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      h1, h2 { margin: 0; font-weight: 600; letter-spacing: 0; }
+      h1 { font-size: 18px; }
+      h2 { font-size: 16px; }
+
+      .quick {
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .chip {
+        border: 1px solid var(--border);
+        background: #fff;
+        color: var(--text);
+        padding: 7px 10px;
+        border-radius: 6px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      .chat-log {
+        min-height: 460px;
+        max-height: 62vh;
+        overflow: auto;
+        padding: 14px;
+        background: #fbfdff;
+      }
+
+      .msg {
+        margin-bottom: 12px;
+        max-width: 96%;
+        padding: 10px 12px;
+        border-radius: 8px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+      }
+
+      .user { background: var(--brand-soft); border: 1px solid #bde7e0; margin-left: auto; }
+      .assistant { background: #fff; border: 1px solid var(--border); }
+      .meta { margin-top: 6px; font-size: 12px; color: var(--muted); }
+
+      .composer {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        padding: 12px;
+        border-top: 1px solid var(--border);
+      }
+
+      input[type="text"] {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 10px 11px;
+        font-size: 14px;
+      }
+
+      button.primary {
+        border: 0;
+        background: var(--brand);
+        color: #fff;
+        border-radius: 6px;
+        padding: 10px 14px;
+        cursor: pointer;
+      }
+
+      .summary-body { padding: 14px; }
+      .headline {
+        background: #f0f9f8;
+        border: 1px solid #c9ebe6;
+        border-radius: 6px;
+        padding: 10px;
+        margin-bottom: 12px;
+      }
+
+      .point {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 10px;
+        margin-bottom: 8px;
+      }
+
+      .point-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+      .point-detail { font-size: 13px; color: var(--muted); }
+
+      @media (max-width: 900px) {
+        .app { grid-template-columns: 1fr; }
+        .chat-log { max-height: 48vh; min-height: 320px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <section class="panel">
+        <div class="chat-head">
+          <h1>Portfolio Assistant</h1>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button id="apiConfigBtn" class="chip" type="button">API</button>
+            <span id="status" class="meta">Ready</span>
+          </div>
+        </div>
+        <div class="quick">
+          <button class="chip" data-q="Which stock has strongest momentum?">Momentum</button>
+          <button class="chip" data-q="Which stock is fundamentally weak?">Weak Fundamentals</button>
+          <button class="chip" data-q="Which holdings are overvalued?">Overvalued</button>
+          <button class="chip" data-q="What happens if market crashes 20%?">Crash Scenario</button>
+          <button class="chip" data-q="Why is this ETF selected?">ETF Rationale</button>
+          <button class="chip" data-q="What changed today?">Today Update</button>
+        </div>
+        <div id="chatLog" class="chat-log"></div>
+        <div class="composer">
+          <input id="questionInput" type="text" placeholder="Ask about momentum, risk, valuation, SIP, research..." />
+          <button id="askBtn" class="primary">Ask</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="summary-head">
+          <h2>Daily AI Summary</h2>
+          <button id="refreshSummaryBtn" class="chip">Refresh</button>
+        </div>
+        <div id="summaryBody" class="summary-body"></div>
+      </section>
+    </div>
+
+    <script>
+      const savedApiBase = localStorage.getItem("portfolio_api_base");
+      const API_BASE_BY_HOST = {
+        "portfolio-ai-assistant-20260524.netlify.app": "https://vancouver-timeline-mating-deutsch.trycloudflare.com/api"
+      };
+      const API_BASE =
+        savedApiBase ||
+        API_BASE_BY_HOST[window.location.host] ||
+        "http://127.0.0.1:8000/api";
+      const chatLog = document.getElementById("chatLog");
+      const questionInput = document.getElementById("questionInput");
+      const askBtn = document.getElementById("askBtn");
+      const status = document.getElementById("status");
+      const summaryBody = document.getElementById("summaryBody");
+      const refreshSummaryBtn = document.getElementById("refreshSummaryBtn");
+      const apiConfigBtn = document.getElementById("apiConfigBtn");
+
+      function appendMessage(text, type, meta = "") {
+        const box = document.createElement("div");
+        box.className = `msg ${type}`;
+        box.textContent = text;
+        if (meta) {
+          const m = document.createElement("div");
+          m.className = "meta";
+          m.textContent = meta;
+          box.appendChild(m);
+        }
+        chatLog.appendChild(box);
+        chatLog.scrollTop = chatLog.scrollHeight;
+      }
+
+      async function askQuestion(question) {
+        if (!question || !question.trim()) return;
+        appendMessage(question.trim(), "user");
+        status.textContent = "Thinking...";
+        try {
+          const response = await fetch(`${API_BASE}/assistant/ask`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ question: question.trim() })
+          });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const data = await response.json();
+          const evidenceText = data.evidence && data.evidence.length
+            ? `confidence=${data.confidence} | evidence=${data.evidence.length}`
+            : `confidence=${data.confidence}`;
+          appendMessage(data.answer, "assistant", evidenceText);
+          if (data.evidence && data.evidence.length) {
+            const top = data.evidence.slice(0, 2).map(e => `${e.source_type}: ${e.reference}`).join(" | ");
+            appendMessage(`Evidence: ${top}`, "assistant");
+          }
+        } catch (error) {
+          appendMessage(`Assistant call failed. API base in use: ${API_BASE}`, "assistant", String(error));
+        } finally {
+          status.textContent = "Ready";
+        }
+      }
+
+      async function loadSummary() {
+        summaryBody.innerHTML = "<div class='meta'>Loading summary...</div>";
+        try {
+          const response = await fetch(`${API_BASE}/assistant/daily-summary`);
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const data = await response.json();
+          const points = data.points
+            .map(p => `<div class="point"><div class="point-title">${p.title}</div><div class="point-detail">${p.detail}</div></div>`)
+            .join("");
+          summaryBody.innerHTML = `
+            <div class="headline"><strong>${data.headline}</strong><div class="meta">Date: ${data.summary_date}</div></div>
+            ${points}
+          `;
+        } catch (error) {
+          summaryBody.innerHTML = `<div class="meta">Summary load failed: ${String(error)}</div>`;
+        }
+      }
+
+      askBtn.addEventListener("click", () => {
+        const q = questionInput.value;
+        questionInput.value = "";
+        askQuestion(q);
+      });
+
+      questionInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          askBtn.click();
+        }
+      });
+
+      document.querySelectorAll(".chip[data-q]").forEach(btn => {
+        btn.addEventListener("click", () => askQuestion(btn.getAttribute("data-q")));
+      });
+
+      refreshSummaryBtn.addEventListener("click", async () => {
+        await fetch(`${API_BASE}/assistant/daily-summary/generate`, { method: "POST" });
+        await loadSummary();
+      });
+
+      apiConfigBtn.addEventListener("click", () => {
+        const next = window.prompt("Assistant API base URL", API_BASE);
+        if (!next) return;
+        localStorage.setItem("portfolio_api_base", next.trim());
+        window.location.reload();
+      });
+
+      appendMessage("Assistant is online. Ask directly or use quick prompts.", "assistant");
+      loadSummary();
+    </script>
+  </body>
+</html>

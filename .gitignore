@@ -1,0 +1,10 @@
+﻿venv/
+__pycache__/
+*.pyc
+.env
+*.xlsx
+*.xls
+.DS_Store
+folder_structure.txt
+data/npm_tmp/
+node_modules/
