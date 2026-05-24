@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+import tempfile
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from backend.app.database.session import get_db_session
@@ -71,3 +74,25 @@ def search_documents(payload: ResearchSearchRequest, db: Session = Depends(get_d
 @router.get("/documents", response_model=list[ResearchDocumentItem])
 def list_documents(limit: int = Query(50, ge=1, le=500), db: Session = Depends(get_db_session)) -> list[ResearchDocumentItem]:
     return research_service.list_research_documents(db, limit=limit)
+
+
+@router.post("/ingest/upload-file", response_model=ResearchIngestResult)
+async def ingest_uploaded_file(
+    file: UploadFile = File(...),
+    channel_name: str | None = Form(None),
+    clear_existing: bool = Form(False),
+    max_pdf_pages: int = Form(30),
+    db: Session = Depends(get_db_session),
+) -> ResearchIngestResult:
+    suffix = Path(file.filename or "").suffix or ".txt"
+    with tempfile.TemporaryDirectory() as temp_dir:
+        file_path = Path(temp_dir) / (file.filename or f"upload{suffix}")
+        file_path.write_bytes(await file.read())
+        payload = ResearchIngestRequest(
+            source_folder=temp_dir,
+            channel_name=channel_name,
+            clear_existing=clear_existing,
+            max_files=1,
+            max_pdf_pages=max_pdf_pages,
+        )
+        return research_service.ingest_research_documents(payload, db)
