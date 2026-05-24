@@ -1,0 +1,98 @@
+name: Portfolio Cloud Cron
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_holdings_import:
+        description: "Import holdings from URL sources"
+        required: false
+        default: "false"
+      run_research_fetch:
+        description: "Run Telegram fetch endpoint"
+        required: false
+        default: "false"
+  schedule:
+    # Daily analysis: 2:45 PM IST = 09:15 UTC
+    - cron: "15 9 * * *"
+    # Weekly ETF SIP: Thursday 3:00 PM IST = 09:30 UTC
+    - cron: "30 9 * * 4"
+    # Monthly SIP: 5th day, 3:00 PM IST = 09:30 UTC
+    - cron: "30 9 5 * *"
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    env:
+      API_BASE: ${{ secrets.RENDER_API_BASE }}
+      STOCK_FILE_URL: ${{ secrets.STOCK_HOLDINGS_FILE_URL }}
+      ETF_FILE_URL: ${{ secrets.ETF_HOLDINGS_FILE_URL }}
+      TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+      TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+      TG_GROUP_IDS: ${{ secrets.TG_GROUP_IDS }}
+    steps:
+      - name: Validate API base
+        run: |
+          if [ -z "$API_BASE" ]; then
+            echo "Missing secret: RENDER_API_BASE"
+            exit 1
+          fi
+          echo "Using API: $API_BASE"
+
+      - name: Health check
+        run: |
+          curl -fsS "${API_BASE%/api}/health"
+
+      - name: Optional holdings import from cloud URLs
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_holdings_import == 'true' }}
+        run: |
+          set -e
+          if [ -z "$STOCK_FILE_URL" ] || [ -z "$ETF_FILE_URL" ]; then
+            echo "Skipping holdings import. Set STOCK_HOLDINGS_FILE_URL and ETF_HOLDINGS_FILE_URL secrets."
+            exit 0
+          fi
+          curl -fsSL "$STOCK_FILE_URL" -o /tmp/stock_file.xlsx
+          curl -fsSL "$ETF_FILE_URL" -o /tmp/etf_file.csv
+          curl -fsS -X POST "$API_BASE/imports/holdings/upload" \
+            -F "file=@/tmp/stock_file.xlsx" \
+            -F "broker=groww" \
+            -F "asset_type=stock" \
+            -F "replace_existing=true"
+          curl -fsS -X POST "$API_BASE/imports/holdings/upload" \
+            -F "file=@/tmp/etf_file.csv" \
+            -F "broker=zerodha" \
+            -F "asset_type=etf" \
+            -F "replace_existing=true"
+
+      - name: Optional Telegram fetch
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_research_fetch == 'true' }}
+        run: |
+          set -e
+          if [ -z "$TELEGRAM_API_ID" ] || [ -z "$TELEGRAM_API_HASH" ] || [ -z "$TG_GROUP_IDS" ]; then
+            echo "Skipping Telegram fetch. Set TELEGRAM_API_ID, TELEGRAM_API_HASH, TG_GROUP_IDS secrets."
+            exit 0
+          fi
+          IFS=',' read -r -a ids <<< "$TG_GROUP_IDS"
+          json_ids=$(printf '%s\n' "${ids[@]}" | awk 'NF' | jq -R . | jq -s .)
+          payload=$(jq -n \
+            --argjson gids "$json_ids" \
+            --argjson aid "$TELEGRAM_API_ID" \
+            --arg ah "$TELEGRAM_API_HASH" \
+            '{api_id: $aid, api_hash: $ah, group_ids: $gids, days_back: 7, max_docs_per_group: 25}')
+          curl -fsS -X POST "$API_BASE/research/telegram/fetch" \
+            -H "Content-Type: application/json" \
+            -d "$payload"
+
+      - name: Rebuild snapshots and summary
+        run: |
+          set -e
+          curl -fsS "$API_BASE/technical/snapshot" > /dev/null
+          curl -fsS "$API_BASE/fundamental/snapshot" > /dev/null
+          curl -fsS "$API_BASE/sip/recommendations" > /dev/null
+          curl -fsS -X POST "$API_BASE/assistant/daily-summary/generate"
+
+      - name: Report latest summary + research count
+        run: |
+          set -e
+          curl -fsS "$API_BASE/assistant/daily-summary"
+          echo
+          curl -fsS "$API_BASE/research/documents?limit=5"
