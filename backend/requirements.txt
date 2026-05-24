@@ -10,3 +10,4 @@ openpyxl
 python-dotenv
 pypdf
 telethon
+python-multipart
